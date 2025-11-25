@@ -1,7 +1,8 @@
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_groq import ChatGroq
 from src.models.question_schemas import MCQQuestion, FillBlankQuestion
-from ..prompts.quiz_templates import (
+
+from src.prompts.quiz_templates import (
     mcq_prompt_template,
     fill_blank_prompt_template,
 )
