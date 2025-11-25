@@ -1,5 +1,6 @@
 from langchain_groq import ChatGroq
-from langchain.prompts import PromptTemplate
+# from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 from src.config.settings import settings
 from src.common.logger import get_logger
 from src.common.custom_exception import CustomException

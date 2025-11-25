@@ -1,4 +1,6 @@
-from langchain.prompts import PromptTemplate
+# from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
+
 
 career_coaching_template = PromptTemplate(
     template="""You are an expert career coach with deep knowledge of professional development, 
