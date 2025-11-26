@@ -2,7 +2,6 @@ from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
 import pandas as pd
 from datetime import datetime
-import os
 from src.common.logger import get_logger
 from src.common.custom_exception import CustomException
 from src.config.settings import settings
@@ -10,33 +9,34 @@ from src.config.settings import settings
 logger = get_logger(__name__)
 
 class DatabaseManager:
-    # Class-level connection pool (shared across all instances)
     _client = None
     _db = None
     
-    def __init__(self, mongo_uri="mongodb://localhost:27017/", db_name="growth_companion"):
-        """Initialize MongoDB connection with connection pooling"""
+    def __init__(self, db_name="growth_companion"):
+        """Use settings.MONGO_URI, no hardcoded localhost!"""
         try:
             # Use existing connection if available
             if DatabaseManager._client is None:
+                if not settings.MONGO_URI:
+                    raise CustomException("Missing MongoDB URI", "settings.MONGO_URI is empty")
                 DatabaseManager._client = MongoClient(
-                    mongo_uri,
-                    maxPoolSize=50,  # Connection pooling
+                    settings.MONGO_URI,
+                    maxPoolSize=50,
                     minPoolSize=10,
                     maxIdleTimeMS=45000,
                     serverSelectionTimeoutMS=5000
                 )
                 DatabaseManager._db = DatabaseManager._client[db_name]
                 self._create_indexes()
-                logger.info(f"Connected to MongoDB with connection pooling: {db_name}")
+                logger.info(f"Connected to MongoDB Atlas: {db_name}")
             else:
                 logger.info("Reusing existing MongoDB connection pool")
             
             self.client = DatabaseManager._client
             self.db = DatabaseManager._db
-            
+        
         except ConnectionFailure as e:
-            logger.error(f"Failed to connect to MongoDB: {e}")
+            logger.error(f"Failed to connect to MongoDB Atlas: {e}")
             raise CustomException("MongoDB connection failed", e)
     
     def _create_indexes(self):

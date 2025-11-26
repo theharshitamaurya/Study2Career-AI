@@ -1,6 +1,12 @@
 import os
 from dotenv import load_dotenv
 
+# Try to import Streamlit for secrets support (safe if not on cloud)
+try:
+    import streamlit as st
+except ImportError:
+    st = None
+
 load_dotenv()
 
 class Settings:
@@ -17,8 +23,12 @@ class Settings:
     HF_SENTIMENT_MODEL = os.getenv("HF_SENTIMENT_MODEL", "cardiffnlp/twitter-roberta-base-sentiment-latest")
     HF_TEXT_MODEL = os.getenv("HF_TEXT_MODEL", "mistralai/Mistral-7B-Instruct-v0.2")
     
-    # Database
-    DB_PATH = os.getenv("DB_PATH", "data/growth_companion.db")
+    # MongoDB Connection (Atlas/Cloud)
+    # Try to get URI from Streamlit secrets if running online, fallback to ENV for local dev
+    MONGO_URI = (
+        st.secrets["MONGO_URI"] if st is not None and "MONGO_URI" in st.secrets
+        else os.getenv("MONGO_URI")
+    )
     
     # Application
     MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
@@ -29,6 +39,8 @@ class Settings:
         """Validate required settings"""
         if not cls.GROQ_API_KEY:
             raise ValueError("GROQ_API_KEY not found in environment variables")
+        if not cls.MONGO_URI:
+            raise ValueError("MONGO_URI not found in environment variables or Streamlit secrets!")
         return True
 
 settings = Settings()
