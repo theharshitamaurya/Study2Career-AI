@@ -1,5 +1,5 @@
-
 from pymongo import MongoClient
+from pymongo.errors import ConnectionFailure
 import pandas as pd
 from datetime import datetime
 import os
@@ -10,26 +10,44 @@ from src.config.settings import settings
 logger = get_logger(__name__)
 
 class DatabaseManager:
+    # Class-level connection pool (shared across all instances)
+    _client = None
+    _db = None
+    
     def __init__(self, mongo_uri="mongodb://localhost:27017/", db_name="growth_companion"):
-        """Initialize MongoDB connection"""
+        """Initialize MongoDB connection with connection pooling"""
         try:
-            self.client = MongoClient(mongo_uri)
-            self.db = self.client[db_name]
-            self._create_indexes()
-            logger.info(f"Connected to MongoDB: {db_name}")
-        except Exception as e:
+            # Use existing connection if available
+            if DatabaseManager._client is None:
+                DatabaseManager._client = MongoClient(
+                    mongo_uri,
+                    maxPoolSize=50,  # Connection pooling
+                    minPoolSize=10,
+                    maxIdleTimeMS=45000,
+                    serverSelectionTimeoutMS=5000
+                )
+                DatabaseManager._db = DatabaseManager._client[db_name]
+                self._create_indexes()
+                logger.info(f"Connected to MongoDB with connection pooling: {db_name}")
+            else:
+                logger.info("Reusing existing MongoDB connection pool")
+            
+            self.client = DatabaseManager._client
+            self.db = DatabaseManager._db
+            
+        except ConnectionFailure as e:
             logger.error(f"Failed to connect to MongoDB: {e}")
             raise CustomException("MongoDB connection failed", e)
     
     def _create_indexes(self):
         """Create indexes for better query performance"""
         try:
-            # Index on user_id for all collections
-            self.db.career_goals.create_index("user_id")
-            self.db.personal_goals.create_index("user_id")
-            self.db.daily_tasks.create_index("user_id")
+            # Compound indexes for better performance
+            self.db.career_goals.create_index([("user_id", 1), ("created", -1)])
+            self.db.personal_goals.create_index([("user_id", 1), ("created", -1)])
+            self.db.daily_tasks.create_index([("user_id", 1), ("added", -1)])
             self.db.chat_history.create_index([("user_id", 1), ("timestamp", -1)])
-            self.db.quiz_results.create_index([("user_id", 1), ("subject", 1)])
+            self.db.quiz_results.create_index([("user_id", 1), ("subject", 1), ("taken_at", -1)])
             self.db.quiz_sessions.create_index([("user_id", 1), ("created_at", -1)])
             logger.info("MongoDB indexes created successfully")
         except Exception as e:
@@ -57,10 +75,12 @@ class DatabaseManager:
             raise CustomException("Failed to add career goal", e)
 
     def get_career_goals(self, user_id):
-        """Get all career goals for a user"""
+        """Get all career goals for a user - optimized with projection"""
         try:
+            # Only fetch required fields
             goals = list(self.db.career_goals.find(
-                {"user_id": user_id}
+                {"user_id": user_id},
+                {"_id": 1, "user_id": 1, "goal": 1, "deadline": 1, "priority": 1, "progress": 1, "created": 1, "notes": 1}
             ).sort("created", -1))
             
             # Convert ObjectId to string for DataFrame compatibility
@@ -116,10 +136,11 @@ class DatabaseManager:
             raise CustomException("Failed to add personal goal", e)
     
     def get_personal_goals(self, user_id):
-        """Get all personal goals for a user"""
+        """Get all personal goals for a user - optimized with projection"""
         try:
             goals = list(self.db.personal_goals.find(
-                {"user_id": user_id}
+                {"user_id": user_id},
+                {"_id": 1, "user_id": 1, "goal": 1, "category": 1, "completed": 1, "created": 1, "notes": 1}
             ).sort("created", -1))
             
             for goal in goals:
@@ -171,10 +192,11 @@ class DatabaseManager:
             raise CustomException("Failed to add task", e)
     
     def get_daily_tasks(self, user_id):
-        """Get all daily tasks for a user"""
+        """Get all daily tasks for a user - optimized with projection"""
         try:
             tasks = list(self.db.daily_tasks.find(
-                {"user_id": user_id}
+                {"user_id": user_id},
+                {"_id": 1, "user_id": 1, "task": 1, "category": 1, "priority": 1, "completed": 1, "added": 1, "completed_at": 1}
             ).sort("added", -1))
             
             for task in tasks:
@@ -222,10 +244,11 @@ class DatabaseManager:
             logger.error(f"Failed to add chat message: {e}")
     
     def get_chat_history(self, user_id, limit=20):
-        """Get chat history for a user"""
+        """Get chat history for a user - optimized with limit and projection"""
         try:
             messages = list(self.db.chat_history.find(
-                {"user_id": user_id}
+                {"user_id": user_id},
+                {"_id": 1, "user_id": 1, "role": 1, "content": 1, "timestamp": 1}
             ).sort("timestamp", 1).limit(limit))
             
             for msg in messages:
@@ -283,13 +306,17 @@ class DatabaseManager:
             return None
     
     def get_quiz_history(self, user_id, subject=None):
-        """Get quiz history for analytics"""
+        """Get quiz history for analytics - optimized with projection"""
         try:
             query = {"user_id": user_id}
             if subject:
                 query["subject"] = subject
             
-            results = list(self.db.quiz_results.find(query).sort("taken_at", -1))
+            results = list(self.db.quiz_results.find(
+                query,
+                {"_id": 1, "user_id": 1, "subject": 1, "question_type": 1, "question": 1, 
+                 "user_answer": 1, "correct_answer": 1, "is_correct": 1, "difficulty": 1, "taken_at": 1}
+            ).sort("taken_at", -1))
             
             for result in results:
                 result['_id'] = str(result['_id'])
@@ -300,14 +327,17 @@ class DatabaseManager:
             return pd.DataFrame()
     
     def get_quiz_sessions(self, user_id):
-        """Get all quiz session summaries"""
+        """Get all quiz session summaries - optimized with projection"""
         try:
             sessions = list(self.db.quiz_sessions.find(
-                {"user_id": user_id}
+                {"user_id": user_id},
+                {"_id": 1, "user_id": 1, "subject": 1, "total_questions": 1, 
+                 "correct_answers": 1, "score_percentage": 1, "difficulty": 1, "created_at": 1}
             ).sort("created_at", -1))
             
             for session in sessions:
                 session['_id'] = str(session['_id'])
+                session['id'] = session['_id']
             
             return pd.DataFrame(sessions) if sessions else pd.DataFrame()
         except Exception as e:
@@ -317,7 +347,10 @@ class DatabaseManager:
     def close(self):
         """Close MongoDB connection"""
         try:
-            self.client.close()
-            logger.info("MongoDB connection closed")
+            if DatabaseManager._client:
+                DatabaseManager._client.close()
+                DatabaseManager._client = None
+                DatabaseManager._db = None
+                logger.info("MongoDB connection closed")
         except Exception as e:
             logger.error(f"Error closing MongoDB: {e}")
